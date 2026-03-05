@@ -4,435 +4,445 @@
 
 1. [Introducción y motivación](#1-introducción-y-motivación)
 2. [Descripción física del sistema](#2-descripción-física-del-sistema)
-3. [Ecuación gobernante: la ecuación de onda 2D](#3-ecuación-gobernante-la-ecuación-de-onda-2d)
+3. [Modelo físico completo: la ecuación gobernante](#3-modelo-físico-completo-la-ecuación-gobernante)
 4. [Condiciones de contorno](#4-condiciones-de-contorno)
-5. [Soluciones analíticas: modos normales de vibración](#5-soluciones-analíticas-modos-normales-de-vibración)
-6. [Discretización del dominio espacial](#6-discretización-del-dominio-espacial)
-7. [Discretización temporal: esquema en diferencias finitas](#7-discretización-temporal-esquema-en-diferencias-finitas)
-8. [Discretización de las condiciones de contorno](#8-discretización-de-las-condiciones-de-contorno)
-9. [Condición de estabilidad de Courant-Friedrichs-Lewy (CFL)](#9-condición-de-estabilidad-de-courant-friedrichs-lewy-cfl)
-10. [Resumen del algoritmo de integración temporal](#10-resumen-del-algoritmo-de-integración-temporal)
+5. [Perfil de equilibrio estático](#5-perfil-de-equilibrio-estático)
+6. [Soluciones analíticas: modos normales de vibración](#6-soluciones-analíticas-modos-normales-de-vibración)
+7. [Respuesta en frecuencia y resonancia amortiguada](#7-respuesta-en-frecuencia-y-resonancia-amortiguada)
+8. [Discretización del dominio espacial](#8-discretización-del-dominio-espacial)
+9. [Discretización temporal: esquema en diferencias finitas](#9-discretización-temporal-esquema-en-diferencias-finitas)
+10. [Discretización de las condiciones de contorno](#10-discretización-de-las-condiciones-de-contorno)
+11. [Condición de estabilidad de Courant-Friedrichs-Lewy (CFL)](#11-condición-de-estabilidad-de-courant-friedrichs-lewy-cfl)
+12. [Resumen del algoritmo de integración temporal](#12-resumen-del-algoritmo-de-integración-temporal)
+13. [Efectos físicos no modelados](#13-efectos-físicos-no-modelados)
 
 ---
 
 ## 1. Introducción y motivación
 
-Una sábana extendida y sometida a tensión es un sistema físico continuo cuya dinámica está gobernada por una ecuación en derivadas parciales (EDP) hiperbólica: la **ecuación de onda bidimensional**. Cuando uno de sus bordes es forzado a oscilar a una frecuencia determinada, la sábana responde con una combinación de sus modos propios de vibración. Si la frecuencia de forzamiento coincide con alguna de las frecuencias naturales del sistema, se produce **resonancia**, dando lugar a patrones de oscilación estacionarios de gran amplitud conocidos como **modos normales** o **armónicos**.
+Una sábana extendida y sometida a tensión es un sistema físico continuo cuya dinámica está gobernada por una ecuación en derivadas parciales (EDP) hiperbólica: la **ecuación de onda bidimensional**. Sin embargo, una sábana real no se comporta como una membrana ideal: el material textil es **viscoelástico** (combina propiedades elásticas y viscosas internas), el aire que la rodea introduce **amortiguamiento proporcional a la velocidad**, y la gravedad actúa como una **carga transversal distribuida** que deforma el perfil de reposo.
 
-El estudio de estos modos tiene aplicaciones directas en ingeniería (membranas de altavoces, tímpanos de instrumentos de percusión, velas de embarcaciones), biomecánica (tímpano del oído, tejidos elásticos) y física fundamental (cuerdas de Chladni, figuras de arena sobre placas vibrantes).
+Cuando uno de sus bordes es forzado a oscilar a una frecuencia determinada, la sábana responde con una superposición de sus modos propios de vibración. Si la frecuencia de forzamiento coincide con alguna de las frecuencias naturales del sistema se produce **resonancia**: la amplitud de oscilación alcanza un máximo **finito**, determinado por el amortiguamiento total del sistema. Este comportamiento contrasta con el de la membrana ideal, donde la amplitud en resonancia crecería indefinidamente, y es exactamente lo que se observa en la realidad.
 
-Desde el punto de vista computacional, la integración numérica de la ecuación de onda 2D sobre una malla fina constituye un problema de alto coste computacional: en cada paso de tiempo es necesario actualizar el valor de la función en los $N^2$ puntos de la malla, lo que para mallas grandes (e.g. $N = 1000$, con $10^6$ puntos) y miles de pasos temporales supone centenares de millones de operaciones en punto flotante. Este carácter intensivo en cómputo lo convierte en un caso de uso ideal para la **paralelización con OpenMP**.
+Desde el punto de vista computacional, la integración numérica de la ecuación de onda 2D sobre una malla fina constituye un problema de alto coste computacional: en cada paso de tiempo es necesario actualizar el valor de la función en los $N^2$ puntos de la malla, y el coste total escala como $\mathcal{O}(N^3)$ para un tiempo de simulación fijo. Este carácter intensivo en cómputo lo convierte en un caso de uso ideal para la **paralelización con OpenMP**, cuyo impacto en el rendimiento es el objeto principal de este trabajo.
 
 ---
 
 ## 2. Descripción física del sistema
 
-Se considera una sábana delgada, flexible e inextensible de forma cuadrada con lado de longitud $L$, sometida a una tensión superficial uniforme $T$ (en N/m). La sábana se modela como una **membrana ideal**, lo que implica las siguientes hipótesis simplificadoras:
+Se considera una sábana delgada de forma cuadrada con lado de longitud $L$, dispuesta **horizontalmente** en el plano $XY$ y sometida a una tensión superficial uniforme $T$ (en N/m). El desplazamiento se produce en la dirección **vertical** $Z$, que es también la dirección de la gravedad.
 
-- La sábana es perfectamente flexible: no opone resistencia a la curvatura (no hay rigidez a la flexión).
-- Los desplazamientos transversales $u$ son **pequeños** en comparación con $L$, de modo que la tensión puede considerarse constante y uniforme en toda la membrana durante el movimiento.
-- No existe amortiguamiento (la energía mecánica se conserva).
-- La densidad superficial de masa $\rho$ (en kg/m²) es uniforme.
+### 2.1 Sistema de referencia
 
-El sistema de referencia se establece de la siguiente manera:
-
-- El plano $xy$ define el plano de reposo de la sábana.
+- El plano $XY$ define el plano de reposo de la sábana.
 - El dominio espacial es el cuadrado $\Omega = [0, L] \times [0, L]$.
-- El desplazamiento transversal fuera del plano en el punto $(x, y)$ y en el instante $t$ se denota por $u(x, y, t)$.
+- El desplazamiento transversal en el punto $(x, y)$ y en el instante $t$ se denota $u(x, y, t)$ [m], tomado positivo hacia arriba.
+- La gravedad apunta en la dirección $-Z$, con módulo $g = 9.81$ m/s².
 
-La sábana tiene **cuatro bordes**:
+### 2.2 Hipótesis del modelo
 
-| Borde | Ecuación | Condición física |
+- Los desplazamientos transversales $u$ son **pequeños** en comparación con $L$, de modo que la tensión superficial puede considerarse constante, uniforme e isótropa durante el movimiento (hipótesis de membrana linealizada).
+- La densidad superficial de masa $\rho$ [kg/m²] es uniforme.
+- El material es **viscoelástico lineal**, modelado mediante el modelo de Kelvin-Voigt: la respuesta mecánica del tejido combina un componente elástico (proporcional a la deformación) y un componente viscoso interno (proporcional a la velocidad de deformación), actuando en paralelo.
+- El rozamiento con el aire es **viscoso lineal**: la fuerza de amortiguamiento por unidad de área es proporcional a la velocidad local $\partial u / \partial t$ y se opone al movimiento.
+- La tensión superficial es la misma en todas las direcciones del plano (material isótropo).
+
+### 2.3 Configuración de los bordes
+
+| Borde | Ecuación del contorno | Condición física |
 |---|---|---|
-| Borde inferior | $y = 0$ | **Fijo** (empotrado, nodo) |
-| Borde superior | $y = L$ | **Forzado** con movimiento armónico prescrito |
-| Borde izquierdo | $x = 0$ | **Libre** (sin restricción transversal) |
-| Borde derecho | $x = L$ | **Libre** (sin restricción transversal) |
-
-El borde en $y = 0$ está fijo: no puede desplazarse en ningún instante. El borde en $y = L$, paralelo al anterior, se hace oscilar con una amplitud $A$ y una frecuencia angular $\omega$, actuando como el forzamiento del sistema. Los dos bordes restantes, perpendiculares al eje de excitación, están libres: pueden desplazarse pero no están sometidos a ninguna fuerza normal externa, lo que se traduce en una condición de gradiente nulo en la dirección perpendicular al borde.
+| Borde inferior | $y = 0$ | **Fijo** — nodo permanente, anclado a una estructura rígida |
+| Borde superior | $y = L$ | **Forzado** — movimiento armónico prescrito en $Z$ |
+| Borde izquierdo | $x = 0$ | **Libre** — sin fuerza normal externa |
+| Borde derecho | $x = L$ | **Libre** — sin fuerza normal externa |
 
 ---
 
-## 3. Ecuación gobernante: la ecuación de onda 2D
+## 3. Modelo físico completo: la ecuación gobernante
 
-### 3.1 Deducción a partir del principio de Newton
+### 3.1 Fuerzas que actúan sobre un elemento diferencial
 
-Consideremos un elemento diferencial de sábana de dimensiones $dx \times dy$ y masa $dm = \rho \, dx \, dy$. Las fuerzas transversales ejercidas sobre este elemento por la tensión superficial en las cuatro aristas son:
+Consideremos un elemento diferencial de sábana de dimensiones $dx \times dy$, masa $dm = \rho \, dx \, dy$, y desplazamiento vertical $u(x,y,t)$. Sobre este elemento actúan cuatro tipos de fuerzas en la dirección $Z$:
 
-- En la dirección $x$: la componente transversal neta es $T \, dy \, \left(\frac{\partial^2 u}{\partial x^2}\right) dx$
-- En la dirección $y$: la componente transversal neta es $T \, dx \, \left(\frac{\partial^2 u}{\partial y^2}\right) dy$
+**a) Fuerza elástica de membrana (tensión superficial)**
 
-Aplicando la segunda ley de Newton ($F = ma$) al elemento diferencial:
+La tensión superficial $T$ actúa tangencialmente a lo largo de los cuatro bordes del elemento diferencial. Para desplazamientos pequeños, la componente vertical neta de estas fuerzas de tensión es proporcional a la curvatura local de la superficie:
 
-$$\rho \, dx \, dy \, \frac{\partial^2 u}{\partial t^2} = T \, dy \, \frac{\partial^2 u}{\partial x^2} \, dx + T \, dx \, \frac{\partial^2 u}{\partial y^2} \, dy$$
+$$dF_\text{elástica} = T \left( \frac{\partial^2 u}{\partial x^2} + \frac{\partial^2 u}{\partial y^2} \right) dx \, dy = T \, \nabla^2 u \, dx \, dy$$
 
-Dividiendo por $\rho \, dx \, dy$:
+El operador laplaciano $\nabla^2 u$ mide la curvatura media de la superficie: si la sábana está curvada hacia arriba en un punto, la fuerza de tensión actúa hacia abajo restaurando el equilibrio, y viceversa.
 
-$$\frac{\partial^2 u}{\partial t^2} = \frac{T}{\rho} \left( \frac{\partial^2 u}{\partial x^2} + \frac{\partial^2 u}{\partial y^2} \right)$$
+**b) Fuerza viscosa interna del material: modelo de Kelvin-Voigt**
 
-### 3.2 Forma canónica
+En el modelo de Kelvin-Voigt, el material textil se idealiza como un resorte elástico y un amortiguador viscoso dispuestos **en paralelo**. El resorte reproduce la respuesta elástica (ya capturada por el término de tensión superficial). El amortiguador interno genera una fuerza proporcional a la velocidad de deformación: cuanto más rápido cambia la curvatura de la sábana, mayor es la fuerza viscosa interna que se opone a ese cambio. Matemáticamente, la fuerza viscosa interna por unidad de área en la dirección $Z$ es:
 
-Definiendo la **velocidad de propagación de ondas** en la membrana:
+$$dF_\text{visc. interna} = \eta \, \nabla^2 \dot{u} \, dx \, dy = \eta \left( \frac{\partial^2 \dot{u}}{\partial x^2} + \frac{\partial^2 \dot{u}}{\partial y^2} \right) dx \, dy$$
 
-$$c = \sqrt{\frac{T}{\rho}} \quad \left[\frac{\text{m}}{\text{s}}\right]$$
+donde $\dot{u} = \partial u / \partial t$ es la velocidad transversal y $\eta$ [N·s/m] es el **coeficiente de viscosidad superficial interna** del material. La consecuencia física más importante de este término es que **amortigua preferentemente los modos de alta frecuencia**: los modos con muchos nodos tienen mayor curvatura (mayor laplaciano) y por tanto experimentan mayor fuerza viscosa interna, disipándose mucho más rápido que los modos bajos.
 
-la ecuación de movimiento adopta su forma canónica:
+**c) Amortiguamiento viscoso externo (rozamiento con el aire)**
 
-$$\boxed{\frac{\partial^2 u}{\partial t^2} = c^2 \, \nabla^2 u = c^2 \left( \frac{\partial^2 u}{\partial x^2} + \frac{\partial^2 u}{\partial y^2} \right)}$$
+El aire en contacto con ambas caras de la sábana ejerce sobre ella una fuerza de rozamiento proporcional a la velocidad local y opuesta al movimiento:
 
-Esta es la **ecuación de onda bidimensional** (o ecuación de la membrana), una EDP hiperbólica de segundo orden en el tiempo y en el espacio.
+$$dF_\text{aire} = -b \, \dot{u} \, dx \, dy$$
 
-### 3.3 Interpretación física
+donde $b$ [kg/(m²·s)] es el **coeficiente de amortiguamiento viscoso externo**. A diferencia del amortiguamiento viscoelástico interno, este término amortigua todos los modos de forma aproximadamente **uniforme**, independientemente de su frecuencia espacial.
 
-El operador laplaciano $\nabla^2 u$ mide la curvatura local de la sábana. Cuando la sábana está curvada en un punto, la tensión superficial ejerce una fuerza neta sobre el elemento diferencial en esa zona, que actúa como fuerza restauradora. Esta fuerza es proporcional a $T$ y a la curvatura: a mayor tensión o mayor curvatura, mayor aceleración de retorno. El parámetro $c$ determina con qué rapidez se propagan las perturbaciones a través de la membrana.
+**d) Gravedad**
+
+Al estar la sábana horizontal y las oscilaciones en la dirección vertical, la gravedad actúa como una carga transversal uniforme y constante sobre toda la membrana:
+
+$$dF_\text{gravedad} = -\rho \, g \, dx \, dy$$
+
+En esta configuración la gravedad no modifica la tensión superficial en el plano (como sí haría en una membrana vertical), sino que simplemente actúa como término fuente: su efecto neto es **combrar la sábana hacia abajo** en su posición de reposo.
+
+### 3.2 Ecuación de movimiento completa
+
+Aplicando la segunda ley de Newton al elemento diferencial y sumando todas las contribuciones:
+
+$$\rho \, \frac{\partial^2 u}{\partial t^2} = T \, \nabla^2 u + \eta \, \nabla^2 \dot{u} - b \, \dot{u} - \rho \, g$$
+
+Definiendo los parámetros reducidos del modelo:
+
+| Parámetro | Definición | Unidades | Significado físico |
+|---|---|---|---|
+| $c$ | $\sqrt{T/\rho}$ | m/s | Velocidad de propagación de ondas elásticas |
+| $\alpha$ | $\eta / \rho$ | m²/s | Difusividad viscoelástica del material |
+| $\beta$ | $b / \rho$ | 1/s | Tasa de amortiguamiento viscoso externo |
+
+La **ecuación gobernante** en su forma canónica es:
+
+$$\boxed{\frac{\partial^2 u}{\partial t^2} = c^2 \nabla^2 u + \alpha \, \nabla^2 \dot{u} - \beta \, \dot{u} - g}$$
+
+### 3.3 Interpretación física de cada término
+
+- $c^2 \nabla^2 u$: fuerza restauradora elástica. Término dominante; gobierna la propagación de ondas transversales con velocidad $c$.
+- $\alpha \, \nabla^2 \dot{u}$: disipación viscoelástica interna. Actúa como una difusión de velocidades y amortigua selectivamente los modos de alto número de onda.
+- $-\beta \, \dot{u}$: amortiguamiento por rozamiento con el aire. Frena el movimiento uniformemente en toda la sábana.
+- $-g$: carga gravitatoria uniforme. Desplaza el perfil de equilibrio hacia abajo sin alterar la dinámica de las perturbaciones.
+
+### 3.4 Descomposición en equilibrio y perturbación
+
+Es conveniente descomponer el desplazamiento en:
+
+$$u(x, y, t) = u_\text{eq}(x, y) + u'(x, y, t)$$
+
+El perfil de equilibrio estático satisface la ecuación de Poisson $c^2 \nabla^2 u_\text{eq} = g$, y la perturbación dinámica satisface la ecuación sin el término gravitatorio. En la simulación numérica se integra directamente la ecuación completa, capturando ambos efectos de forma automática.
 
 ---
 
 ## 4. Condiciones de contorno
 
-La solución de la ecuación de onda requiere especificar condiciones en todos los bordes del dominio para todo instante $t \geq 0$.
-
-### 4.1 Borde fijo: $y = 0$ (condición de Dirichlet homogénea)
-
-El borde inferior permanece inmóvil en todo momento:
+### 4.1 Borde fijo: $y = 0$ (Dirichlet homogéneo)
 
 $$u(x, 0, t) = 0 \quad \forall x \in [0, L], \, \forall t \geq 0$$
 
-Esta es una **condición de Dirichlet homogénea**: se prescribe el valor de la función en el contorno. Físicamente corresponde a tener el borde anclado a una estructura rígida.
-
-### 4.2 Borde forzado: $y = L$ (condición de Dirichlet no homogénea)
-
-El borde superior oscila armónicamente con amplitud $A$ y frecuencia angular $\omega$:
+### 4.2 Borde forzado: $y = L$ (Dirichlet no homogéneo)
 
 $$u(x, L, t) = A \sin(\omega t) \quad \forall x \in [0, L], \, \forall t \geq 0$$
 
-Esta es una **condición de Dirichlet no homogénea**: se prescribe un valor dependiente del tiempo en el contorno. El forzamiento es uniforme a lo largo de todo el borde (no depende de $x$), lo que privilegia la excitación de modos con perfil uniforme en $x$, en particular el modo $m = 0$.
+El forzamiento es uniforme en $x$, por lo que inyecta energía principalmente en los modos con $m=0$ (perfil constante en $x$). Cuando su frecuencia coincide con alguna $\omega_{mn}$, el sistema entra en resonancia.
 
-### 4.3 Bordes libres: $x = 0$ y $x = L$ (condición de Neumann homogénea)
+### 4.3 Bordes libres: $x = 0$ y $x = L$ (Neumann homogéneo)
 
-Los bordes laterales están libres de fuerza transversal externa. La condición de contorno libre implica que no hay fuerza de tensión en la dirección normal al borde, lo que se traduce en que la derivada normal del desplazamiento es nula:
+$$\frac{\partial u}{\partial x}(0, y, t) = 0, \quad \frac{\partial u}{\partial x}(L, y, t) = 0 \quad \forall y \in [0, L], \, \forall t \geq 0$$
 
-$$\frac{\partial u}{\partial x}(0, y, t) = 0 \quad \forall y \in [0, L], \, \forall t \geq 0$$
-
-$$\frac{\partial u}{\partial x}(L, y, t) = 0 \quad \forall y \in [0, L], \, \forall t \geq 0$$
-
-Estas son **condiciones de Neumann homogéneas**: se prescribe la derivada normal de la función en el contorno. Físicamente significa que la sábana puede adoptar cualquier altura en los bordes laterales, pero no puede tener pendiente en la dirección $x$ en esos puntos (el borde es siempre localmente horizontal en esa dirección). Matemáticamente, esto equivale a que la sábana se refleja en los bordes $x = 0$ y $x = L$ como si existiesen imágenes simétricas del dominio a ambos lados.
+La sábana puede adoptar cualquier altura en los bordes laterales, pero su tangente es siempre horizontal en la dirección $x$ en esos puntos. Las ondas se reflejan perfectamente en estos bordes sin pérdida de energía.
 
 ### 4.4 Condiciones iniciales
 
-Para completar el problema de valor inicial y de contorno (PVIC), se necesitan dos condiciones iniciales (dado que la ecuación es de segundo orden en el tiempo):
+La sábana parte del reposo en su posición no deformada:
 
-$$u(x, y, 0) = u_0(x, y) \quad \text{(desplazamiento inicial)}$$
-
-$$\frac{\partial u}{\partial t}(x, y, 0) = v_0(x, y) \quad \text{(velocidad inicial)}$$
-
-En nuestra simulación tomamos $u_0 = 0$ y $v_0 = 0$: la sábana parte del reposo en su posición de equilibrio.
+$$u(x, y, 0) = 0, \qquad \frac{\partial u}{\partial t}(x, y, 0) = 0$$
 
 ---
 
-## 5. Soluciones analíticas: modos normales de vibración
+## 5. Perfil de equilibrio estático
 
-### 5.1 Separación de variables
+El perfil de equilibrio $u_\text{eq}(y)$ satisface $c^2 d^2u_\text{eq}/dy^2 = g$ con $u_\text{eq}(0)=0$ y $u_\text{eq}(L)=0$. Integrando dos veces:
 
-Para encontrar las soluciones propias del sistema (sin forzamiento, solo con las condiciones de contorno homogéneas en $y=0$ y $y=L$, y las condiciones de Neumann en $x$), se buscan soluciones de la forma:
+$$\boxed{u_\text{eq}(y) = \frac{g}{2c^2} \, y(y - L)}$$
 
-$$u(x, y, t) = X(x) \cdot Y(y) \cdot T(t)$$
+Esta es una parábola cóncava hacia abajo con descenso máximo en el centro:
 
-Sustituyendo en la ecuación de onda y separando variables:
+$$u_\text{eq,min} = u_\text{eq}(L/2) = -\frac{g L^2}{8c^2}$$
 
-$$\frac{T''}{c^2 T} = \frac{X''}{X} + \frac{Y''}{Y} = -\lambda^2$$
+Para una sábana típica de $L = 2$ m, $T = 20$ N/m, $\rho = 0.2$ kg/m² (con $c = 10$ m/s), el descenso central es $u_\text{eq,min} \approx -0.49$ mm: pequeño pero no despreciable para amplitudes de oscilación del orden del milímetro.
 
-Esto conduce a tres ecuaciones diferenciales ordinarias (EDOs) desacopladas:
+---
 
-$$T'' + c^2 \lambda^2 T = 0$$
-$$X'' + k_x^2 X = 0, \quad Y'' + k_y^2 Y = 0$$
+## 6. Soluciones analíticas: modos normales de vibración
 
-con la relación de dispersión: $\lambda^2 = k_x^2 + k_y^2$.
+### 6.1 Separación de variables
 
-### 5.2 Solución para $X(x)$: condiciones de Neumann
+Para el sistema sin forzamiento ni amortiguamiento ($\alpha = \beta = 0$, $g = 0$), se buscan soluciones de la forma $u' = X(x)Y(y)T(t)$. Las condiciones de contorno seleccionan:
 
-Con las condiciones $X'(0) = 0$ y $X'(L) = 0$, la solución general $X(x) = A\cos(k_x x) + B\sin(k_x x)$ impone $B = 0$ (de $X'(0) = 0$) y $k_x = m\pi/L$ con $m = 0, 1, 2, \ldots$ (de $X'(L) = 0$). Por tanto:
-
+**En $x$ (condiciones de Neumann):**
 $$X_m(x) = \cos\left(\frac{m\pi x}{L}\right), \quad m = 0, 1, 2, \ldots$$
 
-### 5.3 Solución para $Y(y)$: condiciones de Dirichlet
-
-Con las condiciones $Y(0) = 0$ e $Y(L) = 0$, la solución impone $k_y = n\pi/L$ con $n = 1, 2, 3, \ldots$ y:
-
+**En $y$ (condiciones de Dirichlet):**
 $$Y_n(y) = \sin\left(\frac{n\pi y}{L}\right), \quad n = 1, 2, 3, \ldots$$
 
-### 5.4 Modos normales y frecuencias propias
+### 6.2 Formas propias y frecuencias naturales
 
-Las soluciones propias del sistema son:
+Las **formas propias** son:
 
-$$u_{mn}(x, y, t) = \cos\left(\frac{m\pi x}{L}\right) \sin\left(\frac{n\pi y}{L}\right) \cos(\omega_{mn} t + \phi_{mn})$$
+$$\phi_{mn}(x,y) = \cos\left(\frac{m\pi x}{L}\right) \sin\left(\frac{n\pi y}{L}\right)$$
 
-con **frecuencias angulares propias**:
+y las **frecuencias angulares naturales**:
 
-$$\boxed{\omega_{mn} = c\pi \sqrt{\left(\frac{m}{L}\right)^2 + \left(\frac{n}{L}\right)^2} = \frac{c\pi}{L}\sqrt{m^2 + n^2}}$$
+$$\boxed{\omega_{mn} = \frac{c\pi}{L}\sqrt{m^2 + n^2}}$$
 
-y **frecuencias propias** (en Hz):
+Los primeros modos ordenados por frecuencia creciente:
 
-$$f_{mn} = \frac{\omega_{mn}}{2\pi} = \frac{c}{2L}\sqrt{m^2 + n^2}$$
-
-### 5.5 Significado de los índices $(m, n)$
-
-- El índice $m$ cuenta el número de **semiondes en la dirección $x$** (nodos verticales internos).
-- El índice $n$ cuenta el número de **semiondes en la dirección $y$** (nodos horizontales internos, sin contar los bordes fijo y libre).
-
-Los primeros modos ordenados por frecuencia creciente son:
-
-| Modo $(m, n)$ | $\sqrt{m^2+n^2}$ | Frecuencia relativa $f_{mn}/f_{01}$ | Descripción |
+| Modo $(m, n)$ | $\sqrt{m^2+n^2}$ | $f_{mn}/f_{01}$ | Descripción |
 |:---:|:---:|:---:|---|
-| $(0, 1)$ | $1$ | $1.000$ | Modo fundamental: oscilación uniforme en $x$, una semionda en $y$ |
-| $(1, 1)$ | $\sqrt{2}$ | $1.414$ | Una semionda en $x$, una en $y$ |
-| $(0, 2)$ | $2$ | $2.000$ | Dos semiondes en $y$, uniforme en $x$ |
-| $(1, 2)$ | $\sqrt{5}$ | $2.236$ | Una en $x$, dos en $y$ |
-| $(2, 1)$ | $\sqrt{5}$ | $2.236$ | Dos en $x$, una en $y$ |
-| $(2, 2)$ | $2\sqrt{2}$ | $2.828$ | Dos en $x$, dos en $y$ |
-| $(0, 3)$ | $3$ | $3.000$ | Tres semiondes en $y$, uniforme en $x$ |
-
-Cuando la frecuencia de forzamiento $\omega$ coincide con algún $\omega_{mn}$, el sistema entra en **resonancia** y la amplitud de oscilación crece de forma sostenida (indefinidamente en ausencia de amortiguamiento).
+| $(0, 1)$ | $1$ | $1.000$ | Fundamental: uniforme en $x$, una semionda en $y$ |
+| $(1, 1)$ | $\sqrt{2} \approx 1.414$ | $1.414$ | Una semionda en $x$, una en $y$ |
+| $(0, 2)$ | $2$ | $2.000$ | Uniforme en $x$, dos semiondes en $y$ |
+| $(1, 2)$ | $\sqrt{5} \approx 2.236$ | $2.236$ | Una en $x$, dos en $y$ |
+| $(2, 1)$ | $\sqrt{5} \approx 2.236$ | $2.236$ | Dos en $x$, una en $y$ |
+| $(2, 2)$ | $2\sqrt{2} \approx 2.828$ | $2.828$ | Dos en $x$, dos en $y$ |
+| $(0, 3)$ | $3$ | $3.000$ | Uniforme en $x$, tres semiondes en $y$ |
 
 ---
 
-## 6. Discretización del dominio espacial
+## 7. Respuesta en frecuencia y resonancia amortiguada
 
-### 6.1 Malla uniforme
+### 7.1 Ecuación modal con amortiguamiento
 
-El dominio continuo $\Omega = [0, L] \times [0, L]$ se discretiza mediante una **malla uniforme** de $N \times N$ puntos:
+Al proyectar la ecuación gobernante sobre cada modo propio $\phi_{mn}$ se obtiene la ecuación del oscilador armónico amortiguado:
 
-$$x_i = i \cdot h, \quad i = 0, 1, \ldots, N-1$$
-$$y_j = j \cdot h, \quad j = 0, 1, \ldots, N-1$$
+$$\ddot{q}_{mn} + 2\zeta_{mn}\omega_{mn}\dot{q}_{mn} + \omega_{mn}^2 q_{mn} = F_{mn}(t)$$
 
-donde el **paso espacial** es:
+El **factor de amortiguamiento modal** recibe contribuciones de ambos mecanismos de disipación:
 
-$$h = \frac{L}{N - 1}$$
+$$\boxed{\zeta_{mn} = \underbrace{\frac{\beta}{2\omega_{mn}}}_{\text{amort. externo (uniforme)}} + \underbrace{\frac{\alpha \, k_{mn}^2}{2\omega_{mn}}}_{\text{amort. viscoelástico (crece con el modo)}}}$$
 
-El valor de la solución en el nodo $(i, j)$ y en el instante $k$ se denota:
+con $k_{mn}^2 = (m^2 + n^2)\pi^2/L^2$.
 
-$$u_{i,j}^k \approx u(x_i, y_j, t_k)$$
+Este resultado formaliza la diferencia entre los dos mecanismos: el amortiguamiento externo $\beta$ contribuye de forma que decrece con la frecuencia del modo, mientras que el viscoelástico $\alpha k_{mn}^2$ crece con $\sqrt{m^2+n^2}$, disipando mucho más rápido los modos altos. La combinación produce un amortiguamiento no monótono en función del número de modo, que es físicamente realista.
 
-### 6.2 Aproximación del laplaciano: diferencias centradas de segundo orden
+### 7.2 Amplitud en resonancia
 
-Se aproxima cada derivada segunda mediante la fórmula de **diferencias finitas centradas**:
+Para forzamiento armónico $F_{mn}(t) = F_0\sin(\omega t)$, la amplitud en régimen estacionario es:
 
-$$\frac{\partial^2 u}{\partial x^2}\bigg|_{i,j}^k \approx \frac{u_{i+1,j}^k - 2u_{i,j}^k + u_{i-1,j}^k}{h^2} + \mathcal{O}(h^2)$$
+$$|q_{mn}|_\text{estac} = \frac{F_0/\omega_{mn}^2}{\sqrt{(1-\Omega^2)^2 + (2\zeta_{mn}\Omega)^2}}, \quad \Omega = \frac{\omega}{\omega_{mn}}$$
 
-$$\frac{\partial^2 u}{\partial y^2}\bigg|_{i,j}^k \approx \frac{u_{i,j+1}^k - 2u_{i,j}^k + u_{i,j-1}^k}{h^2} + \mathcal{O}(h^2)$$
+En resonancia exacta ($\Omega = 1$):
 
-El error de truncación es de orden $\mathcal{O}(h^2)$: al reducir el paso espacial a la mitad, el error espacial se reduce en un factor de 4.
+$$|q_{mn}|_\text{res} = \frac{F_0/\omega_{mn}^2}{2\zeta_{mn}}$$
 
-El laplaciano discreto completo es:
-
-$$\nabla^2 u_{i,j}^k \approx \frac{u_{i+1,j}^k + u_{i-1,j}^k + u_{i,j+1}^k + u_{i,j-1}^k - 4u_{i,j}^k}{h^2}$$
-
-Este operador es el conocido como **stencil de 5 puntos** (o estrella de 5 puntos), que utiliza el nodo central y sus cuatro vecinos inmediatos (norte, sur, este, oeste).
-
-### 6.3 Validez de la aproximación
-
-La fórmula de diferencias centradas para la segunda derivada se obtiene combinando los desarrollos de Taylor de $u(x+h)$ y $u(x-h)$:
-
-$$u(x+h) = u(x) + h u'(x) + \frac{h^2}{2} u''(x) + \frac{h^3}{6} u'''(x) + \frac{h^4}{24} u^{(4)}(x) + \ldots$$
-
-$$u(x-h) = u(x) - h u'(x) + \frac{h^2}{2} u''(x) - \frac{h^3}{6} u'''(x) + \frac{h^4}{24} u^{(4)}(x) + \ldots$$
-
-Sumando ambas expresiones:
-
-$$u(x+h) + u(x-h) = 2u(x) + h^2 u''(x) + \frac{h^4}{12} u^{(4)}(x) + \ldots$$
-
-Despejando $u''(x)$:
-
-$$u''(x) = \frac{u(x+h) - 2u(x) + u(x-h)}{h^2} - \frac{h^2}{12} u^{(4)}(x) + \ldots$$
-
-El error dominante es $\mathcal{O}(h^2)$, lo que confirma la consistencia de segundo orden del esquema.
+La amplitud es **finita** siempre que $\zeta_{mn} > 0$, a diferencia del sistema ideal donde crecería linealmente con el tiempo. El factor de calidad $Q = 1/(2\zeta_{mn})$ mide la agudeza del pico: para $\zeta_{mn} = 0.01$ (amortiguamiento del 1%), $Q = 50$ y la amplitud en resonancia es 50 veces la amplitud estática.
 
 ---
 
-## 7. Discretización temporal: esquema en diferencias finitas
+## 8. Discretización del dominio espacial
 
-### 7.1 Aproximación de la derivada temporal de segundo orden
+### 8.1 Malla uniforme
 
-De forma análoga al caso espacial, se aproxima la derivada segunda en el tiempo mediante diferencias centradas:
+El dominio $\Omega = [0,L]\times[0,L]$ se discretiza con una malla uniforme de $N \times N$ nodos y paso espacial:
 
-$$\frac{\partial^2 u}{\partial t^2}\bigg|_{i,j}^k \approx \frac{u_{i,j}^{k+1} - 2u_{i,j}^k + u_{i,j}^{k-1}}{\Delta t^2} + \mathcal{O}(\Delta t^2)$$
+$$h = \frac{L}{N-1}, \quad x_i = ih, \quad y_j = jh, \quad i,j = 0,\ldots,N-1$$
 
-donde $\Delta t$ es el **paso temporal** y $u_{i,j}^{k-1}$, $u_{i,j}^k$, $u_{i,j}^{k+1}$ representan los valores en los instantes anteriores, actual y siguiente, respectivamente.
+Se denota $u_{i,j}^k \approx u(x_i, y_j, t_k)$ con $t_k = k\Delta t$.
 
-### 7.2 Esquema explícito de integración temporal (FTCS)
+### 8.2 Laplaciano discreto: stencil de 5 puntos
 
-Sustituyendo las aproximaciones de la derivada temporal y del laplaciano en la ecuación de onda:
+Por desarrollo de Taylor de orden 4 se obtiene la aproximación de segundo orden:
 
-$$\frac{u_{i,j}^{k+1} - 2u_{i,j}^k + u_{i,j}^{k-1}}{\Delta t^2} = c^2 \cdot \frac{u_{i+1,j}^k + u_{i-1,j}^k + u_{i,j+1}^k + u_{i,j-1}^k - 4u_{i,j}^k}{h^2}$$
+$$\left(\nabla^2 u\right)_{i,j}^k \approx \frac{u_{i+1,j}^k + u_{i-1,j}^k + u_{i,j+1}^k + u_{i,j-1}^k - 4u_{i,j}^k}{h^2} + \mathcal{O}(h^2)$$
 
-Despejando $u_{i,j}^{k+1}$, que es el valor desconocido en el instante siguiente:
+El error de truncación dominante es $-(h^2/12)(\partial^4u/\partial x^4 + \partial^4u/\partial y^4)$, confirmando el orden 2 espacial.
 
-$$\boxed{u_{i,j}^{k+1} = 2u_{i,j}^k - u_{i,j}^{k-1} + r^2 \left( u_{i+1,j}^k + u_{i-1,j}^k + u_{i,j+1}^k + u_{i,j-1}^k - 4u_{i,j}^k \right)}$$
+### 8.3 Discretización del término viscoelástico
 
-donde $r$ es el **número de Courant** (o número CFL):
+Se define el **numerador del laplaciano discreto**:
 
-$$r = \frac{c \, \Delta t}{h}$$
+$$\mathcal{L}_{i,j}^k = u_{i+1,j}^k + u_{i-1,j}^k + u_{i,j+1}^k + u_{i,j-1}^k - 4u_{i,j}^k$$
 
-### 7.3 Propiedades del esquema
+La velocidad se aproxima con diferencias hacia atrás para mantener la explicitud del esquema:
 
-Este esquema se denomina **explícito** porque el valor en el instante $k+1$ se calcula directamente a partir de los valores conocidos en los instantes $k$ y $k-1$, sin necesidad de resolver ningún sistema de ecuaciones. Las ventajas e inconvenientes son:
+$$\dot{u}_{i,j}^k \approx \frac{u_{i,j}^k - u_{i,j}^{k-1}}{\Delta t} + \mathcal{O}(\Delta t)$$
 
-| Característica | Valor |
+El laplaciano de la velocidad queda entonces:
+
+$$\left(\nabla^2\dot{u}\right)_{i,j}^k \approx \frac{\mathcal{L}_{i,j}^k - \mathcal{L}_{i,j}^{k-1}}{h^2 \Delta t}$$
+
+---
+
+## 9. Discretización temporal: esquema en diferencias finitas
+
+### 9.1 Ensamblaje de la ecuación discreta completa
+
+Aplicando diferencias centradas de segundo orden para la aceleración y sustituyendo todas las aproximaciones en la ecuación gobernante:
+
+$$\frac{u_{i,j}^{k+1} - 2u_{i,j}^k + u_{i,j}^{k-1}}{\Delta t^2} = \frac{c^2}{h^2}\mathcal{L}_{i,j}^k + \frac{\alpha}{h^2\Delta t}\left(\mathcal{L}_{i,j}^k - \mathcal{L}_{i,j}^{k-1}\right) - \beta\frac{u_{i,j}^k - u_{i,j}^{k-1}}{\Delta t} - g$$
+
+Despejando $u_{i,j}^{k+1}$ y definiendo los coeficientes adimensionales $r^2 = c^2\Delta t^2/h^2$ y $\gamma = \alpha\Delta t/h^2$:
+
+$$\boxed{u_{i,j}^{k+1} = (2-\beta\Delta t)\,u_{i,j}^k + (\beta\Delta t - 1)\,u_{i,j}^{k-1} + (r^2+\gamma)\,\mathcal{L}_{i,j}^k - \gamma\,\mathcal{L}_{i,j}^{k-1} - g\Delta t^2}$$
+
+Para $\alpha=0$, $\beta=0$, $g=0$ se recupera exactamente el esquema clásico de la membrana ideal: $u_{i,j}^{k+1} = 2u_{i,j}^k - u_{i,j}^{k-1} + r^2\mathcal{L}_{i,j}^k$.
+
+### 9.2 Propiedades del esquema
+
+| Propiedad | Valor |
 |---|---|
-| Tipo | Explícito (leapfrog) |
-| Orden en el tiempo | $\mathcal{O}(\Delta t^2)$ |
-| Orden en el espacio | $\mathcal{O}(h^2)$ |
+| Tipo | Explícito (leapfrog modificado) |
+| Orden temporal | $\mathcal{O}(\Delta t^2)$ elástico/gravitatorio; $\mathcal{O}(\Delta t)$ disipativos |
+| Orden espacial | $\mathcal{O}(h^2)$ |
 | Coste por paso | $\mathcal{O}(N^2)$ operaciones |
-| Necesidad de resolver sistema lineal | No |
-| Condición de estabilidad | Sí (véase §9) |
+| Sistema lineal a resolver | No |
+| Arrays necesarios | 3 niveles de $u$ + laplaciano del nivel anterior $\mathcal{L}^{k-1}$ |
 
-El coste computacional por paso de tiempo es $\mathcal{O}(N^2)$ operaciones, ya que para cada uno de los $N^2$ nodos de la malla se realizan un número fijo de operaciones aritméticas (sumas y multiplicaciones). Este bucle doble sobre los nodos interiores es el núcleo computacional del programa y el objetivo principal de la paralelización.
+### 9.3 Inicialización del primer paso
 
-### 7.4 Inicialización: el primer paso temporal
+Con condición inicial de velocidad nula, la simetría $u^{-1} = u^1$ permite deducir:
 
-El esquema necesita los valores en dos instantes anteriores para avanzar: $u^{k-1}$ y $u^k$. Para el primer paso ($k=0 \to k=1$) no se dispone de $u^{-1}$. Se resuelve utilizando la condición inicial de velocidad $v_0 = \partial u / \partial t |_{t=0} = 0$:
+$$u_{i,j}^1 = -\frac{g\Delta t^2}{2}$$
 
-$$\frac{u_{i,j}^1 - u_{i,j}^{-1}}{2\Delta t} = 0 \implies u_{i,j}^{-1} = u_{i,j}^1$$
-
-Sustituyendo en la fórmula de actualización para $k=0$:
-
-$$u_{i,j}^1 = u_{i,j}^0 + \frac{r^2}{2} \left( u_{i+1,j}^0 + u_{i-1,j}^0 + u_{i,j+1}^0 + u_{i,j-1}^0 - 4u_{i,j}^0 \right)$$
-
-Con $u_{i,j}^0 = 0$, resulta simplemente $u_{i,j}^1 = 0$ para los nodos interiores (excepto los bordes con condiciones de Dirichlet no homogéneas).
+para los nodos interiores (la sábana comienza a caer por la gravedad desde el primer instante).
 
 ---
 
-## 8. Discretización de las condiciones de contorno
+## 10. Discretización de las condiciones de contorno
 
-### 8.1 Borde fijo ($j = 0$): Dirichlet homogéneo
-
-La implementación es directa: se impone explícitamente:
+### 10.1 Borde fijo ($j = 0$)
 
 $$u_{i,0}^k = 0 \quad \forall i, k$$
 
-Estos nodos nunca se actualizan con la fórmula general; su valor siempre es cero.
+### 10.2 Borde forzado ($j = N-1$)
 
-### 8.2 Borde forzado ($j = N-1$): Dirichlet no homogéneo
+$$u_{i,N-1}^k = A\sin(\omega\,k\,\Delta t) \quad \forall i$$
 
-De forma análoga, en cada paso de tiempo $k$ se impone:
+Esta condición se impone después de la actualización general, sobreescribiendo los valores calculados en esa fila.
 
-$$u_{i,N-1}^k = A \sin(\omega \, t_k) = A \sin(\omega \, k \, \Delta t) \quad \forall i$$
+### 10.3 Bordes libres: nodos fantasma
 
-Esta condición actúa como fuente de energía del sistema.
+La condición $\partial u/\partial x = 0$ en $x=0$ y $x=L$ se implementa con nodos virtuales fuera del dominio. Imponiendo diferencias centradas de orden 2:
 
-### 8.3 Bordes libres ($i = 0$ e $i = N-1$): Neumann homogéneo
+$$u_{-1,j}^k = u_{1,j}^k, \quad u_{N,j}^k = u_{N-2,j}^k$$
 
-La condición $\partial u / \partial x = 0$ en los bordes laterales no puede aplicarse directamente a los nodos del borde con el stencil de 5 puntos, ya que el nodo $u_{-1,j}^k$ (o $u_{N,j}^k$) no existe en la malla.
+El laplaciano discreto en los nodos del borde queda:
 
-Se recurre al método de los **nodos fantasma** (*ghost nodes*): se introducen formalmente nodos virtuales fuera del dominio, $u_{-1,j}^k$ y $u_{N,j}^k$, y se determina su valor a partir de la condición de Neumann mediante diferencias centradas:
+$$\mathcal{L}_{0,j}^k = 2u_{1,j}^k + u_{0,j+1}^k + u_{0,j-1}^k - 4u_{0,j}^k$$
 
-$$\frac{u_{1,j}^k - u_{-1,j}^k}{2h} = 0 \implies u_{-1,j}^k = u_{1,j}^k$$
+$$\mathcal{L}_{N-1,j}^k = 2u_{N-2,j}^k + u_{N-1,j+1}^k + u_{N-1,j-1}^k - 4u_{N-1,j}^k$$
 
-$$\frac{u_{N,j}^k - u_{N-2,j}^k}{2h} = 0 \implies u_{N,j}^k = u_{N-2,j}^k$$
-
-Esto equivale a **reflejar simétricamente** la malla en los bordes laterales. Sustituyendo en la fórmula de actualización para los nodos del borde $i=0$:
-
-$$u_{0,j}^{k+1} = 2u_{0,j}^k - u_{0,j}^{k-1} + r^2 \left( 2u_{1,j}^k + u_{0,j+1}^k + u_{0,j-1}^k - 4u_{0,j}^k \right)$$
-
-Y de forma análoga para $i = N-1$:
-
-$$u_{N-1,j}^{k+1} = 2u_{N-1,j}^k - u_{N-1,j}^{k-1} + r^2 \left( 2u_{N-2,j}^k + u_{N-1,j+1}^k + u_{N-1,j-1}^k - 4u_{N-1,j}^k \right)$$
+La misma corrección se aplica a $\mathcal{L}^{k-1}$ de forma consistente.
 
 ---
 
-## 9. Condición de estabilidad de Courant-Friedrichs-Lewy (CFL)
+## 11. Condición de estabilidad de Courant-Friedrichs-Lewy (CFL)
 
-### 9.1 Análisis de estabilidad de Von Neumann
+### 11.1 Condición hiperbólica (onda elástica)
 
-El análisis de estabilidad de Von Neumann consiste en estudiar la evolución de un modo de Fourier arbitrario $u_{i,j}^k = \xi^k e^{i(k_x x_i + k_y y_j)}$ bajo la acción del esquema de diferencias finitas. Sustituyendo en la ecuación discretizada y simplificando, se obtiene una ecuación para el **factor de amplificación** $\xi$.
+El análisis de estabilidad de Von Neumann para el término elástico, considerando el caso más restrictivo (propagación diagonal), conduce a:
 
-Para que el esquema sea estable (las perturbaciones no crezcan sin límite), es necesario que $|\xi| \leq 1$. El análisis detallado conduce a la condición:
+$$r = \frac{c\Delta t}{h} \leq \frac{1}{\sqrt{2}} \approx 0.707$$
 
-$$r^2 \left(4\sin^2\frac{k_x h}{2} + 4\sin^2\frac{k_y h}{2}\right) \leq 4$$
+### 11.2 Condición parabólica (viscoelasticidad)
 
-El caso más restrictivo se da cuando ambas frecuencias espaciales son máximas ($k_x h = k_y h = \pi$), lo que da:
+El término $\alpha\nabla^2\dot{u}$ introduce comportamiento difusivo con la condición adicional:
 
-$$r^2 \cdot 4 \leq 4 \implies r \leq 1$$
+$$\gamma = \frac{\alpha\Delta t}{h^2} \leq \frac{1}{4}$$
 
-### 9.2 Condición CFL en 2D
+### 11.3 Condición de diseño
 
-Sin embargo, en 2D la condición más restrictiva proviene del caso en que la perturbación se propaga en dirección diagonal ($k_x = k_y$), lo que lleva a:
+Ambas deben satisfacerse simultáneamente. En la práctica, para materiales textiles reales, la condición hiperbólica es siempre la más restrictiva. Se adopta $r = 0.5$ como valor de diseño:
 
-$$\boxed{r = \frac{c \, \Delta t}{h} \leq \frac{1}{\sqrt{2}} \approx 0.707}$$
+$$\boxed{\Delta t = \frac{0.5\,h}{c}}$$
 
-Esta es la **condición de Courant-Friedrichs-Lewy (CFL)** para la ecuación de onda 2D con el esquema explícito de diferencias centradas. Si no se cumple, el error numérico crece exponencialmente con el tiempo y la simulación diverge.
+Con este $\Delta t$, la condición parabólica exige $\alpha \leq ch/2$, lo que debe verificarse explícitamente al fijar los parámetros del material.
 
-### 9.3 Implicaciones prácticas
+### 11.4 Implicaciones en el coste computacional
 
-La condición CFL establece una relación entre el paso espacial $h$ y el paso temporal máximo permitido:
-
-$$\Delta t \leq \frac{h}{c\sqrt{2}}$$
-
-En la práctica se usa un valor de seguridad $r = 0.5$, lo que da:
-
-$$\Delta t = \frac{0.5 \, h}{c}$$
-
-Esto implica que al refinar la malla espacial por un factor de 2 (doblar $N$, reducir $h$ a la mitad), también hay que reducir $\Delta t$ a la mitad, lo que **cuadruplica el número total de operaciones**: la malla pasa de $N^2$ a $4N^2$ puntos, y el número de pasos temporales se dobla. En total, el coste computacional escala como $\mathcal{O}(N^3)$ para un tiempo de simulación fijo.
-
-Este escalado cúbico es la principal justificación del uso de **paralelización**: para mallas de $N = 2000$ y tiempos de simulación largos, el tiempo de cómputo en serie puede ser de horas, mientras que con paralelización OpenMP se puede reducir a minutos.
+La condición CFL impone $\Delta t \propto 1/N$, de modo que al doblar $N$: el número de nodos se cuadruplica y el número de pasos se dobla. El coste total escala como $\mathcal{O}(N^3)$, lo que justifica plenamente la paralelización con OpenMP.
 
 ---
 
-## 10. Resumen del algoritmo de integración temporal
-
-A continuación se presenta el pseudocódigo completo del algoritmo de simulación, que sintetiza todos los elementos anteriores:
+## 12. Resumen del algoritmo de integración temporal
 
 ```
-PARÁMETROS:
-  L     = longitud del lado de la sábana [m]
-  N     = número de nodos por lado
-  c     = velocidad de onda [m/s]
-  A     = amplitud del forzamiento [m]
-  omega = frecuencia angular del forzamiento [rad/s]
-  T_sim = tiempo total de simulación [s]
+PARÁMETROS FÍSICOS DE ENTRADA:
+  L       [m]         Longitud del lado de la sábana
+  rho     [kg/m²]     Densidad superficial de masa
+  T_tens  [N/m]       Tensión superficial
+  eta     [N·s/m]     Coeficiente de viscosidad interna (Kelvin-Voigt)
+  b       [kg/(m²s)]  Coeficiente de amortiguamiento viscoso externo
+  A       [m]         Amplitud del forzamiento
+  omega   [rad/s]     Frecuencia angular del forzamiento
+  T_sim   [s]         Tiempo total de simulación
+  N       [-]         Número de nodos por lado
 
-PREPROCESO:
-  h     = L / (N - 1)             // Paso espacial
-  dt    = 0.5 * h / c             // Paso temporal (CFL con r = 0.5)
-  r     = c * dt / h              // Número de Courant (= 0.5)
-  r2    = r * r                   // r² (precalculado)
-  Nstep = ceil(T_sim / dt)        // Número total de pasos
+PREPROCESO Y VERIFICACIÓN:
+  c     = sqrt(T_tens / rho)
+  alpha = eta / rho
+  beta  = b / rho
+  h     = L / (N - 1)
+  dt    = 0.5 * h / c               // CFL hiperbólica (r = 0.5)
+  r2    = (c * dt / h)^2            // = 0.25
+  gam   = alpha * dt / h^2          // coeficiente viscoelástico
+  ASSERT gam <= 0.25                 // verificar CFL parabólica
+  Nstep = ceil(T_sim / dt)
 
 INICIALIZACIÓN:
-  u_prev[i][j] = 0  para todo (i, j)   // u en t = -dt (simetría)
-  u_curr[i][j] = 0  para todo (i, j)   // u en t = 0
+  u_prev[i][j] = 0     para todo (i,j)
+  u_curr[i][j] = 0     para todo (i,j)
+  L_prev[i][j] = 0     para todo (i,j)
 
 BUCLE TEMPORAL (k = 1, 2, ..., Nstep):
 
   t_k = k * dt
 
-  // PASO 1: Calcular u_next en nodos interiores
+  // PASO 1: Calcular laplaciano L_curr con condiciones de Neumann
   PARA j = 1 hasta N-2:
     PARA i = 0 hasta N-1:
-      // Vecinos con condición de Neumann en i=0 e i=N-1
-      i_left  = (i == 0)   ? 1     : i - 1
-      i_right = (i == N-1) ? N - 2 : i + 1
-      
-      laplaciano = u_curr[i_right][j] + u_curr[i_left][j]
-                 + u_curr[i][j+1]     + u_curr[i][j-1]
-                 - 4 * u_curr[i][j]
-      
-      u_next[i][j] = 2*u_curr[i][j] - u_prev[i][j] + r2 * laplaciano
+      i_l = (i == 0)   ? 1   : i-1
+      i_r = (i == N-1) ? N-2 : i+1
+      L_curr[i][j] = u_curr[i_r][j] + u_curr[i_l][j]
+                   + u_curr[i][j+1] + u_curr[i][j-1]
+                   - 4.0 * u_curr[i][j]
 
-  // PASO 2: Aplicar condición de Dirichlet en j = 0 (borde fijo)
+  // PASO 2: Actualizar todos los nodos interiores
+  PARA j = 1 hasta N-2:
+    PARA i = 0 hasta N-1:
+      u_next[i][j] = (2.0 - beta*dt) * u_curr[i][j]
+                   + (beta*dt - 1.0) * u_prev[i][j]
+                   + (r2 + gam)      * L_curr[i][j]
+                   -  gam            * L_prev[i][j]
+                   -  g * dt * dt
+
+  // PASO 3: Imponer CC en borde fijo (j = 0)
   PARA i = 0 hasta N-1:
     u_next[i][0] = 0.0
 
-  // PASO 3: Aplicar condición de Dirichlet en j = N-1 (borde forzado)
+  // PASO 4: Imponer CC en borde forzado (j = N-1)
   PARA i = 0 hasta N-1:
     u_next[i][N-1] = A * sin(omega * t_k)
 
-  // PASO 4: Avanzar en el tiempo
+  // PASO 5: Rotar arrays temporales
+  L_prev = L_curr
   u_prev = u_curr
   u_curr = u_next
 
 FIN BUCLE
 ```
 
-El **PASO 1** (el doble bucle sobre todos los nodos) concentra prácticamente la totalidad del coste computacional. Para $N = 1000$ nodos por lado y $10^5$ pasos temporales, supone del orden de $10^{11}$ operaciones en punto flotante. Es precisamente en este bucle doble donde se aplican las directivas `#pragma omp parallel for` de OpenMP para distribuir las iteraciones entre los hilos disponibles, logrando una reducción del tiempo de ejecución proporcional al número de núcleos físicos utilizados.
-```
+El núcleo computacional son los pasos 1 y 2: dos bucles dobles sobre los $N \times (N-2)$ nodos. Las iteraciones del bucle externo (sobre $j$) son completamente independientes entre sí, ya que la actualización de cada nodo utiliza únicamente valores del instante anterior. Esta independencia de datos es la que hace posible la paralelización directa con `#pragma omp parallel for` sin ninguna condición de carrera.
+
+---
+
+## 13. Efectos físicos no modelados
+
+| Efecto | Descripción | Impacto estimado |
+|---|---|---|
+| **Rigidez a la flexión** | La tela resiste curvarse (término $D\nabla^4 u$). Relevante para telas gruesas. | Modifica frecuencias propias de modos altos |
+| **Anisotropía del material** | Urdimbre y trama con propiedades distintas: $T_x \neq T_y$. | Rompe la simetría de los modos; separa modos degenerados |
+| **No linealidades geométricas** | Para $u \sim L$, la tensión ya no es constante. | Acopla modos; genera frecuencias de combinación |
+| **Amortiguamiento aerodinámico no lineal** | Rozamiento $\propto \dot{u}^2$ a velocidades altas. | Solo relevante para oscilaciones muy rápidas |
+| **Masa añadida del aire** | El aire que se mueve con la sábana aumenta la inercia efectiva. | Reduce ligeramente todas las frecuencias propias |
+| **No uniformidad real de la tensión** | Depende de cómo se fija la sábana en los bordes. | Difícil de cuantificar sin medición experimental |
+
+Para los objetivos de este trabajo, el modelo adoptado representa el punto óptimo entre **fidelidad física** y **tractabilidad numérica y computacional**.
