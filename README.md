@@ -1,6 +1,4 @@
-Aquí tienes el README actualizado completo para copiar y pegar:
 
----
 
 # Simulación de los Modos Normales de Vibración de una Sábana Elástica mediante Diferencias Finitas
 
