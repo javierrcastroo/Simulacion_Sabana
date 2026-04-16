@@ -31,44 +31,55 @@ int main(int argc, char *argv[]) {
     if (beta * dt >= 1.0) { MPI_Finalize(); return 1; }
     const int nstep = (int)ceil(T_SIM / dt);
 
-    // Reparto de filas (Descomposición de dominio 1D)
+    // Reparto de filas
     int resto = N % size;
     int local_rows = (N / size) + (rank < resto ? 1 : 0);
     
-    // Reservamos espacio para mis filas + 2 filas extra (Halos/Fantasmas)
-    // u[local_rows + 2][N]
-    typedef double (*submatrix_t)[N];
-    submatrix_t u_prev = calloc(local_rows + 2, sizeof(double[N]));
-    submatrix_t u_curr = calloc(local_rows + 2, sizeof(double[N]));
-    submatrix_t u_next = calloc(local_rows + 2, sizeof(double[N]));
+    // Usamos un bloque contiguo de memoria para evitar problemas de alineación
+    double *data_prev = calloc((local_rows + 2) * N, sizeof(double));
+    double *data_curr = calloc((local_rows + 2) * N, sizeof(double));
+    double *data_next = calloc((local_rows + 2) * N, sizeof(double));
 
-    // Identificar vecinos
+    // Punteros para usar sintaxis u[fila][columna]
+    double **u_prev = malloc((local_rows + 2) * sizeof(double *));
+    double **u_curr = malloc((local_rows + 2) * sizeof(double *));
+    double **u_next = malloc((local_rows + 2) * sizeof(double *));
+
+    for (int i = 0; i < local_rows + 2; i++) {
+        u_prev[i] = &data_prev[i * N];
+        u_curr[i] = &data_curr[i * N];
+        u_next[i] = &data_next[i * N];
+    }
+
     int up = (rank == 0) ? MPI_PROC_NULL : rank - 1;
     int down = (rank == size - 1) ? MPI_PROC_NULL : rank + 1;
 
     for (int k = 1; k <= nstep; k++) {
         double t = k * dt;
 
-        // --- INTERCAMBIO DE HALOS ---
-        // Enviamos nuestra primera fila real al de arriba, recibimos su última en nuestro halo [0]
-        MPI_Sendrecv(u_curr[1], N, MPI_DOUBLE, up, 0, 
-                     u_curr[0], N, MPI_DOUBLE, up, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        // Enviamos nuestra última fila real al de abajo, recibimos su primera en nuestro halo [last]
-        MPI_Sendrecv(u_curr[local_rows], N, MPI_DOUBLE, down, 1, 
-                     u_curr[local_rows + 1], N, MPI_DOUBLE, down, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        // INTERCAMBIO DE HALOS (Ordenado para evitar Deadlock)
+        // Los pares envían primero, los impares reciben primero
+        if (rank % 2 == 0) {
+            MPI_Send(u_curr[1],          N, MPI_DOUBLE, up,   0, MPI_COMM_WORLD);
+            MPI_Recv(u_curr[0],          N, MPI_DOUBLE, up,   1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Send(u_curr[local_rows], N, MPI_DOUBLE, down, 1, MPI_COMM_WORLD);
+            MPI_Recv(u_curr[local_rows+1], N, MPI_DOUBLE, down, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        } else {
+            MPI_Recv(u_curr[0],          N, MPI_DOUBLE, up,   1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Send(u_curr[1],          N, MPI_DOUBLE, up,   0, MPI_COMM_WORLD);
+            MPI_Recv(u_curr[local_rows+1], N, MPI_DOUBLE, down, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Send(u_curr[local_rows], N, MPI_DOUBLE, down, 1, MPI_COMM_WORLD);
+        }
 
-        // --- CÁLCULO INTERIOR ---
+        // CÁLCULO
         for (int j = 1; j <= local_rows; j++) {
-            // Determinar si esta fila 'j' es globalmente la 0 o la N-1
             int global_j = rank * (N / size) + (rank < resto ? rank : resto) + (j - 1);
-            
             if (global_j == 0 || global_j == N - 1) continue;
 
             for (int i = 0; i < N; i++) {
                 int il = (i == 0) ? 1 : i - 1;
                 int ir = (i == N - 1) ? N - 2 : i + 1;
 
-                // Accedemos a j+1 y j-1 sin miedo porque los halos tienen los datos del vecino
                 double lap = u_curr[j][ir] + u_curr[j][il] 
                            + u_curr[j+1][i] + u_curr[j-1][i] 
                            - 4.0 * u_curr[j][i];
@@ -77,22 +88,21 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        // --- CONDICIONES DE CONTORNO (Solo los procesos de los extremos) ---
+        // BORDES
         int first_global_j = rank * (N / size) + (rank < resto ? rank : resto);
         int last_global_j = first_global_j + local_rows - 1;
 
-        if (first_global_j == 0) {
+        if (first_global_j == 0) 
             for (int i = 0; i < N; i++) u_next[1][i] = 0.0;
-        }
-        if (last_global_j == N - 1) {
+        if (last_global_j == N - 1) 
             for (int i = 0; i < N; i++) u_next[local_rows][i] = AMP * sin(omega * t);
-        }
 
-        // --- ROTACIÓN DE PUNTEROS ---
-        submatrix_t tmp = u_prev; u_prev = u_curr; u_curr = u_next; u_next = tmp;
+        // ROTACIÓN (Swap de punteros de fila)
+        double **tmp = u_prev; u_prev = u_curr; u_curr = u_next; u_next = tmp;
     }
 
     free(u_prev); free(u_curr); free(u_next);
+    free(data_prev); free(data_curr); free(data_next);
     MPI_Finalize();
     return 0;
 }
