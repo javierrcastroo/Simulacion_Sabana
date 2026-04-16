@@ -14,6 +14,7 @@ do
     echo "------------------------------------------------" >> tiempos_secuencial.txt
     echo "TEST: N=$N_VAL, B=$B_VAL" >> tiempos_secuencial.txt
     echo "------------------------------------------------" >> tiempos_secuencial.txt
+    echo "Ejecutando N=$N_VAL, B=$B_VAL"
     
     # Medimos el tiempo de ejecución real
     # Redirigimos stderr de 'time' a un temporal
