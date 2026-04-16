@@ -3,77 +3,104 @@
 #include <math.h>
 #include <string.h>
 #include <stdint.h>
-#include <omp.h>
 
-#define L       10.0
-#define RHO     0.1
-#define T_TENS  10.0
-#define AMP     0.01
-#define T_SIM   5.0   // Reducido un poco para que los tests no tarden horas
-#define FPS     30
+#define L        10.0      /* side length [m]                          */
+#define RHO      0.1      /* surface mass density [kg/m²]             */
+#define T_TENS   10.0     /* surface tension [N/m]                    */
+                          /* increase to damp faster, decrease for    */
+                          /* longer oscillations. typical range: 0.1-2*/
+#define AMP      0.01     /* forcing amplitude [m]                    */
 
-int main(int argc, char *argv[]) {
-    // Valores por defecto
-    int N = 500;
-    double B_val = 0.002;
+/* ------------------------------------------------------------------ */
+/*  Numerical parameters                                                */
+/* ------------------------------------------------------------------ */
+#define T_SIM    10.0      /* total simulation time [s]                */
 
-    if (argc > 1) N = atoi(argv[1]);
-    if (argc > 2) B_val = atof(argv[2]);
+/* ------------------------------------------------------------------ */
+/*  Output parameters                                                   */
+/* ------------------------------------------------------------------ */
+#define FPS      30       /* frames per second to save                */
 
-    const double c = sqrt(T_TENS / RHO);
-    const double beta = B_val / RHO;
-    const double h = L / (N - 1);
-    const double dt = 0.5 * h / c;
-    const double r2 = (c * dt / h) * (c * dt / h);
-    const double omega = (c * M_PI / L) * 2.3;
+/* ------------------------------------------------------------------ */
 
-    if (beta * dt >= 1.0) {
-        fprintf(stderr, "ERROR: damping too large\n");
+static double u_prev[N][N];
+static double u_curr[N][N];
+static double u_next[N][N];
+
+int main(int argc, char *argv[])
+{
+    if (argc < 3) {
+        fprintf(stderr, "Uso: %s <N> <B>\n", argv[0]);
         return 1;
     }
 
-    int nstep = (int)ceil(T_SIM / dt);
-    int steps_per_frame = (int)ceil(1.0 / (FPS * dt));
+    int N = atoi(argv[1]);
+    double B = atof(argv[2]);
     
-    // Reserva dinámica de matrices N x N
-    double *u_prev = calloc(N * N, sizeof(double));
-    double *u_curr = calloc(N * N, sizeof(double));
-    double *u_next = calloc(N * N, sizeof(double));
-    float *frame_buf = malloc(N * N * sizeof(float));
+    const double c    = sqrt(T_TENS / RHO);
+    const double beta = B / RHO;             /* damping rate [1/s]    */
+    const double h    = L / (N - 1);
+    const double dt   = 0.5 * h / c;
+    const double r2   = (c * dt / h) * (c * dt / h);
 
-    const double c1 = 2.0 - beta * dt;
-    const double c2 = beta * dt - 1.0;
+    /* Damping stability: beta*dt must be < 1 */
+    if (beta * dt >= 1.0) {
+        fprintf(stderr, "ERROR: damping too large (beta*dt=%.4f >= 1)\n",
+                beta * dt);
+        fprintf(stderr, "       Reduce B or increase N.\n");
+        return 1;
+    }
+
+    const int nstep           = (int)ceil(T_SIM / dt);
+    const int steps_per_frame = (int)ceil(1.0 / (FPS * dt));
+    const int nframes         = nstep / steps_per_frame + 1;
+
+    /* Forcing frequency: mode (m=0, n=1) — fundamental */
+    const double omega = (c * M_PI / L) * 2.3;
+
+    memset(u_prev, 0, sizeof(u_prev));
+    memset(u_curr, 0, sizeof(u_curr));
+    memset(u_next, 0, sizeof(u_next));
+
+    /* Precompute damping coefficients */
+    const double c1 = 2.0 - beta * dt;   /* coefficient of u_curr    */
+    const double c2 = beta * dt - 1.0;   /* coefficient of u_prev    */
+
+    int frame_index = 0;
 
     for (int k = 1; k <= nstep; k++) {
+
         double t = k * dt;
 
+        /* ---------------------------------------------------------- */
+        /* STEP 1: update interior nodes                               */
+        /* Each j-row is independent: safe to parallelize with OpenMP  */
+        /* ---------------------------------------------------------- */
         #pragma omp parallel for schedule(static)
         for (int j = 1; j <= N - 2; j++) {
             for (int i = 0; i < N; i++) {
-                int il = (i == 0) ? 1 : i - 1;
+                int il = (i == 0)     ? 1     : i - 1;
                 int ir = (i == N - 1) ? N - 2 : i + 1;
-                
-                // Indexación 2D plana: [j*N + i]
-                double lap = u_curr[ir*N + j] + u_curr[il*N + j]
-                           + u_curr[i*N + (j+1)] + u_curr[i*N + (j-1)]
-                           - 4.0 * u_curr[i*N + j];
-                
-                u_next[i*N + j] = c1 * u_curr[i*N + j]
-                                + c2 * u_prev[i*N + j]
-                                + r2 * lap;
+                double lap = u_curr[ir][j] + u_curr[il][j]
+                           + u_curr[i][j+1] + u_curr[i][j-1]
+                           - 4.0 * u_curr[i][j];
+                u_next[i][j] = c1 * u_curr[i][j]
+                             + c2 * u_prev[i][j]
+                             + r2 * lap;
             }
         }
 
-        // Bordes (simplificado para el ejemplo)
-        for (int i = 0; i < N; i++) {
-            u_next[i*N + 0] = 0.0;
-            u_next[i*N + (N-1)] = AMP * sin(omega * t);
-        }
+        /* STEP 2: fixed boundary y = 0 */
+        for (int i = 0; i < N; i++)
+            u_next[i][0] = 0.0;
 
-        memcpy(u_prev, u_curr, N * N * sizeof(double));
-        memcpy(u_curr, u_next, N * N * sizeof(double));
+        /* STEP 3: forced boundary y = N-1 */
+        for (int i = 0; i < N; i++)
+            u_next[i][N-1] = AMP * sin(omega * t);
+
+        /* STEP 4: rotate arrays */
+        memcpy(u_prev, u_curr, sizeof(u_curr));
+        memcpy(u_curr, u_next, sizeof(u_next));
     }
-
-    free(u_prev); free(u_curr); free(u_next); free(frame_buf);
     return 0;
 }
