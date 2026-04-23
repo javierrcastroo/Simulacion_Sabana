@@ -32,7 +32,7 @@ do
         
         # USAMOS --hostfile para que MPI sepa que debe ir a los otros ordenadores
         # --oversubscribe permite lanzar más procesos que núcleos físicos si fuera necesario
-        mpirun --hostfile $HOSTS --oversubscribe -np $NP ./sheet_cluster $N_VAL $B_VAL
+       mpirun --hostfile $HOSTS -x DISPLAY="" --oversubscribe -np $NP ./sheet_cluster $N_VAL $B_VAL
         
         END_TIME=$(date +%s.%N)
         
