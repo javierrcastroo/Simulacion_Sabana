@@ -9,7 +9,7 @@ PROCESOS="1 2 4 8 16 20"
 PARAM_COMBIS="400|0.002 800|0.002 800|0.005 1000|0.001 1200|0.002"
 
 # 3. Archivo de hosts (Asegúrate de que este archivo existe y tiene las IPs)
-HOSTS="maquinas.txt"
+HOSTS="hostfile"
 
 echo "Resultados MPI en Cluster" > resultados_cluster.txt
 
