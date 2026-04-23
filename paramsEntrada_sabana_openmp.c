@@ -10,7 +10,6 @@
 #define T_TENS   10.0
 #define AMP      0.01
 #define T_SIM    5.0
-#define FPS      30
 
 int main(int argc, char *argv[])
 {
@@ -19,8 +18,8 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    int N = atoi(argv[1]);
-    double B = atof(argv[2]);
+    const int N = atoi(argv[1]);
+    const double B = atof(argv[2]);
     
     const double c    = sqrt(T_TENS / RHO);
     const double beta = B / RHO;
@@ -33,13 +32,10 @@ int main(int argc, char *argv[])
 
     const int nstep = (int)ceil(T_SIM / dt);
 
-    /* Reserva en el HEAP pero manteniendo sintaxis u[i][j].
-       Esto no revienta el stack.
-    */
-    typedef double (*matrix_t)[N];
-    matrix_t u_prev = calloc(1, sizeof(double[N][N]));
-    matrix_t u_curr = calloc(1, sizeof(double[N][N]));
-    matrix_t u_next = calloc(1, sizeof(double[N][N]));
+    /* Reserva en el HEAP con punteros a arrays de tamaño N */
+    double (*u_prev)[N] = calloc(1, sizeof(double[N][N]));
+    double (*u_curr)[N] = calloc(1, sizeof(double[N][N]));
+    double (*u_next)[N] = calloc(1, sizeof(double[N][N]));
 
     const double c1 = 2.0 - beta * dt;
     const double c2 = beta * dt - 1.0;
@@ -47,27 +43,33 @@ int main(int argc, char *argv[])
     for (int k = 1; k <= nstep; k++) {
         double t = k * dt;
 
+        /* El paralelismo se aplica sobre las filas (j) */
         #pragma omp parallel for schedule(static)
         for (int j = 1; j <= N - 2; j++) {
             for (int i = 0; i < N; i++) {
-                int il = (i == 0)     ? 1     : i - 1;
-                int ir = (i == N - 1) ? N - 2 : i + 1;
-                double lap = u_curr[ir][j] + u_curr[il][j]
-                           + u_curr[i][j+1] + u_curr[i][j-1]
-                           - 4.0 * u_curr[i][j];
-                u_next[i][j] = c1 * u_curr[i][j]
-                             + c2 * u_prev[i][j]
+                // Vecinos horizontales (misma fila j, columnas i-1 e i+1)
+                int il = (i == 0)     ? 1      : i - 1;
+                int ir = (i == N - 1) ? N - 2  : i + 1;
+
+                // Cálculo del Laplaciano optimizado para caché (u[fila][columna])
+                double lap = u_curr[j][ir] + u_curr[j][il]
+                           + u_curr[j+1][i] + u_curr[j-1][i]
+                           - 4.0 * u_curr[j][i];
+
+                u_next[j][i] = c1 * u_curr[j][i]
+                             + c2 * u_prev[j][i]
                              + r2 * lap;
             }
         }
 
+        /* Bordes: Fila 0 y Fila N-1 */
         for (int i = 0; i < N; i++) {
-            u_next[i][0] = 0.0;
-            u_next[i][N-1] = AMP * sin(omega * t);
+            u_next[0][i] = 0.0;
+            u_next[N-1][i] = AMP * sin(omega * t);
         }
 
-        // En lugar de memcpy (lento), intercambiamos punteros (rápido)
-        matrix_t tmp = u_prev;
+        // Intercambio de punteros
+        double (*tmp)[N] = u_prev;
         u_prev = u_curr;
         u_curr = u_next;
         u_next = tmp;
