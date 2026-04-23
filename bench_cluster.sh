@@ -11,7 +11,7 @@ PARAM_COMBIS="400|0.002 800|0.002 800|0.005 1000|0.001 1200|0.002"
 # 3. Archivo de hosts (Asegúrate de que este archivo existe y tiene las IPs)
 HOSTS="maquinas.txt"
 
-echo "Resultados MPI en Cluster" > resultados_mpi.txt
+echo "Resultados MPI en Cluster" > resultados_cluster.txt
 
 # Compilamos antes de empezar para asegurar que todos usen la última versión
 # mpicc -O3 paramsEntrada_sabana_mpi_optimiced.c -o sheet_mpi -lm
@@ -19,8 +19,8 @@ echo "Resultados MPI en Cluster" > resultados_mpi.txt
 for COMBI in $PARAM_COMBIS
 do
     IFS='|' read -r N_VAL B_VAL <<< "$COMBI"
-    echo "" >> resultados_mpi.txt
-    echo "--- TEST N=$N_VAL B=$B_VAL ---" >> resultados_mpi.txt
+    echo "" >> resultados_cluster.txt
+    echo "--- TEST N=$N_VAL B=$B_VAL ---" >> resultados_cluster.txt
     echo "N=$N_VAL, B=$B_VAL"
 
     for NP in $PROCESOS
@@ -37,9 +37,9 @@ do
         END_TIME=$(date +%s.%N)
         
         ELAPSED=$(echo "$END_TIME - $START_TIME" | bc)
-        echo "Procesos: $NP | Tiempo: $ELAPSED s" >> resultados_mpi.txt
+        echo "Procesos: $NP | Tiempo: $ELAPSED s" >> resultados_cluster.txt
     done
 done
 
 echo "---------------------------------------"
-echo "Benchmark finalizado. Resultados en resultados_mpi.txt"
+echo "Benchmark finalizado. Resultados en resultados_cluster.txt"
