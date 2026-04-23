@@ -16,7 +16,7 @@ do
         
         START_TIME=$(date +%s.%N)
         # Ejecución con mpirun
-        mpirun --oversubscribe -np $NP ./sheet_mpi $N_VAL $B_VAL
+        mpirun --hostfile -np $NP ./sheet_mpi $N_VAL $B_VAL
         END_TIME=$(date +%s.%N)
         
         ELAPSED=$(echo "$END_TIME - $START_TIME" | bc)
