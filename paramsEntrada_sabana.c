@@ -9,7 +9,6 @@
 #define T_TENS   10.0
 #define AMP      0.01
 #define T_SIM    5.0
-#define FPS      30
 
 int main(int argc, char *argv[])
 {
@@ -32,13 +31,11 @@ int main(int argc, char *argv[])
 
     const int nstep = (int)ceil(T_SIM / dt);
 
-    /* Reserva en el HEAP pero manteniendo sintaxis u[i][j].
-       Esto no revienta el stack.
-    */
+    /* Reserva en el HEAP. Usamos matrix_t[N] para que u[j][i] funcione correctamente */
     typedef double (*matrix_t)[N];
-    matrix_t u_prev = calloc(1, sizeof(double[N][N]));
-    matrix_t u_curr = calloc(1, sizeof(double[N][N]));
-    matrix_t u_next = calloc(1, sizeof(double[N][N]));
+    matrix_t u_prev = calloc(N, sizeof(double[N]));
+    matrix_t u_curr = calloc(N, sizeof(double[N]));
+    matrix_t u_next = calloc(N, sizeof(double[N]));
 
     const double c1 = 2.0 - beta * dt;
     const double c2 = beta * dt - 1.0;
@@ -46,25 +43,32 @@ int main(int argc, char *argv[])
     for (int k = 1; k <= nstep; k++) {
         double t = k * dt;
       
+        // El bucle J (filas) fuera, el bucle I (columnas) dentro
         for (int j = 1; j <= N - 2; j++) {
             for (int i = 0; i < N; i++) {
-                int il = (i == 0)     ? 1     : i - 1;
-                int ir = (i == N - 1) ? N - 2 : i + 1;
-                double lap = u_curr[ir][j] + u_curr[il][j]
-                           + u_curr[i][j+1] + u_curr[i][j-1]
-                           - 4.0 * u_curr[i][j];
-                u_next[i][j] = c1 * u_curr[i][j]
-                             + c2 * u_prev[i][j]
+                // Vecinos en el eje I (columnas, pegados en memoria)
+                int il = (i == 0)     ? 1      : i - 1;
+                int ir = (i == N - 1) ? N - 2  : i + 1;
+
+                // Laplaciano con acceso contiguo: u[fila][columna]
+                // u[j][ir] e u[j][il] están en la misma fila que u[j][i]
+                double lap = u_curr[j][ir] + u_curr[j][il]
+                           + u_curr[j+1][i] + u_curr[j-1][i]
+                           - 4.0 * u_curr[j][i];
+
+                u_next[j][i] = c1 * u_curr[j][i]
+                             + c2 * u_prev[j][i]
                              + r2 * lap;
             }
         }
 
+        // Bordes: u[fila][columna]
         for (int i = 0; i < N; i++) {
-            u_next[i][0] = 0.0;
-            u_next[i][N-1] = AMP * sin(omega * t);
+            u_next[0][i] = 0.0;                       // Fila superior
+            u_next[N-1][i] = AMP * sin(omega * t);    // Fila inferior
         }
 
-        // En lugar de memcpy (lento), intercambiamos punteros (rápido)
+        // Swap de punteros
         matrix_t tmp = u_prev;
         u_prev = u_curr;
         u_curr = u_next;
