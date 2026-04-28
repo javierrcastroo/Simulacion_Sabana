@@ -3,7 +3,7 @@
 # 1. Lista de procesos a probar
 # OJO: Si tienes 4 máquinas y cada una tiene, por ejemplo, 4 núcleos, 
 # puedes probar hasta 16 procesos de forma eficiente.
-PROCESOS="1 2 4 8 16 20"
+PROCESOS="16 20 40 60"
 
 # 2. Combinaciones N|B
 PARAM_COMBIS="400|0.002 800|0.002 800|0.005 1000|0.001 1200|0.002"
