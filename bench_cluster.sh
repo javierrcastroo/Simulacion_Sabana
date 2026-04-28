@@ -35,7 +35,7 @@ echo "" >> resultados_cluster.txt
 echo "--- TEST EXTRA (COMBINACIÓN ESPECIAL) ---" >> resultados_cluster.txt
 IFS='|' read -r NEXTRA BEXTRA <<< "$EXTRA_COMBI"
 
-for NP in 24 32
+for NP in 20 24 32
 do
     echo "   -> [EXTRA] Ejecutando N=$NEXTRA con $NP procesos..."
     
