@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # 1. Configuración de procesos y parámetros
-PROCESOS="20 24 32"
+PROCESOS="20 24 36"
 PARAM_COMBIS="400|0.002 800|0.002 800|0.005 1000|0.001 1200|0.002"
 EXTRA_COMBI="1500|0.001"
 HOSTS="hostfile"
@@ -35,7 +35,7 @@ echo "" >> resultados_cluster.txt
 echo "--- TEST EXTRA (COMBINACIÓN ESPECIAL) ---" >> resultados_cluster.txt
 IFS='|' read -r NEXTRA BEXTRA <<< "$EXTRA_COMBI"
 
-for NP in 20 24 32
+for NP in 20 24 36
 do
     echo "   -> [EXTRA] Ejecutando N=$NEXTRA con $NP procesos..."
     
