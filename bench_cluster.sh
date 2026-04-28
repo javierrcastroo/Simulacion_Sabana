@@ -3,12 +3,12 @@
 # 1. Lista de procesos a probar
 # OJO: Si tienes 4 máquinas y cada una tiene, por ejemplo, 4 núcleos, 
 # puedes probar hasta 16 procesos de forma eficiente.
-PROCESOS="16 20 40 60"
+PROCESOS="20 24 36"
 
 # 2. Combinaciones N|B
 PARAM_COMBIS="400|0.002 800|0.002 800|0.005 1000|0.001 1200|0.002"
 
-EXTRA_COMBI="2000|0.001" 
+EXTRA_COMBI="1500|0.001"
 
 # 3. Archivo de hosts (Asegúrate de que este archivo existe y tiene las IPs)
 HOSTS="hostfile"
@@ -37,7 +37,7 @@ do
         echo "Procesos: $NP | Tiempo: $ELAPSED s" >> resultados_cluster.txt
 
         # --- Lógica extra para 40 o 60 procesos ---
-        if [ "$NP" -eq 40 ] || [ "$NP" -eq 60 ]; then
+        if [ "$NP" -eq 24 ] || [ "$NP" -eq 36 ]; then
             IFS='|' read -r NEXTRA BEXTRA <<< "$EXTRA_COMBI"
             echo "      [Extra] Ejecutando combinación especial para $NP procesos..."
             
