@@ -101,6 +101,20 @@ int main(int argc, char *argv[]) {
         double **tmp = u_prev; u_prev = u_curr; u_curr = u_next; u_next = tmp;
     }
 
+    // VERIFICACIÓN
+    int first_global_j = rank * (N / size) + (rank < resto ? rank : resto);
+    int last_global_j = first_global_j + local_rows - 1;
+    int centro = N / 2;
+
+    if (last_global_j == N - 1) {
+        printf("[Rank %d] Check Borde u[N-1][%d]: %e\n", rank, N/2, u_curr[local_rows][N/2]);
+    }
+    if (centro >= first_global_j && centro <= last_global_j) {
+        int local_centro_idx = centro - first_global_j + 1;
+        printf("[Rank %d] Check Centro u[%d][%d]: %e\n", rank, centro, N/2, u_curr[local_centro_idx][N/2]);
+    }
+    
+    // LIMPIEZA
     free(u_prev); free(u_curr); free(u_next);
     free(data_prev); free(data_curr); free(data_next);
     MPI_Finalize();
