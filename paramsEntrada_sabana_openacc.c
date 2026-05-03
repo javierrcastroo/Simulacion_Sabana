@@ -74,6 +74,8 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    // Imprimimos un valor periférico y uno central como checksum
+    printf("Check: u[N-1][N/2] = %f | u[N/2][N/2] = %f\n", u_curr[N-1][N/2], u_curr[N/2][N/2]);
     free(u_prev); free(u_curr); free(u_next);
     return 0;
 }
