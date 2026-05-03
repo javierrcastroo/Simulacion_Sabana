@@ -77,7 +77,7 @@ int main(int argc, char *argv[])
 
     // Validación
     int centro = N / 2;
-    printf("Check OpenMP: u[N-1][%d] = %e | u[%d][%d] = %e\n", 
+    printf("Check: u[N-1][%d] = %e | u[%d][%d] = %e\n", 
             centro, u_curr[N-1][centro], centro, centro, u_curr[centro][centro]);
     
     // Limpieza
