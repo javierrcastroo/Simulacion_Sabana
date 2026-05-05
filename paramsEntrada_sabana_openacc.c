@@ -69,8 +69,12 @@ int main(int argc, char *argv[]) {
 
             // STEP 4: Rotación de punteros (Swap)
             // IMPORTANTE: En OpenACC, si swapeas en el host, 
-            // el pragma 'present' se encarga de saber quién es quién en la GPU.
-            matrix_t tmp = u_prev; u_prev = u_curr; u_curr = u_next; u_next = tmp;
+            for (int j = 0; j < N; j++) {
+                for (int i = 0; i < N; i++) {
+                    u_prev[j][i] = u_curr[j][i]; // El presente pasa a ser pasado
+                    u_curr[j][i] = u_next[j][i]; // El futuro pasa a ser el presente
+                }
+            }
         }
     }
 
