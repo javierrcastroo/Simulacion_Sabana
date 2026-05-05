@@ -17,9 +17,8 @@ do
     echo "Ejecutando N=$N_VAL, B=$B_VAL"
     
     # Medimos el tiempo de ejecución real
-    # Redirigimos stderr de 'time' a un temporal
     START_TIME=$(date +%s.%N)
-    ./sheet_omp $N_VAL $B_VAL
+    ./sheet $N_VAL $B_VAL
     END_TIME=$(date +%s.%N)
     
     ELAPSED=$(echo "$END_TIME - $START_TIME" | bc)
